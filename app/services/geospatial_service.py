@@ -1,14 +1,17 @@
 from pathlib import Path
-from zipfile import ZipFile
-from pyproj import CRS
+from tempfile import TemporaryDirectory
+from zipfile import BadZipFile, ZipFile
 
 import geopandas as gpd
+from pyproj import CRS
 
 
-def read_geospatial_file(file_path: str | Path) -> gpd.GeoDataFrame:
+def read_geospatial_file(
+    file_path: str | Path
+) -> gpd.GeoDataFrame:
     """
-    Read a supported geospatial file and return its features
-    as a GeoDataFrame.
+    Read a supported geospatial file and return
+    its features as a GeoDataFrame.
     """
 
     file_path = Path(file_path)
@@ -21,10 +24,15 @@ def read_geospatial_file(file_path: str | Path) -> gpd.GeoDataFrame:
     extension = file_path.suffix.lower()
 
     if extension == ".kml":
-        return gpd.read_file(
-            file_path,
-            driver="KML"
-        )
+        try:
+            return gpd.read_file(
+                file_path,
+                driver="KML"
+            )
+        except Exception as error:
+            raise ValueError(
+                "Invalid or corrupted KML file."
+            ) from error
 
     if extension == ".zip":
         return read_shapefile_zip(file_path)
@@ -34,37 +42,72 @@ def read_geospatial_file(file_path: str | Path) -> gpd.GeoDataFrame:
     )
 
 
-def read_shapefile_zip(file_path: Path) -> gpd.GeoDataFrame:
+def read_shapefile_zip(
+    file_path: Path
+) -> gpd.GeoDataFrame:
     """
-    Extract a Shapefile ZIP archive and read the contained .shp file.
+    Safely extract and read a Shapefile ZIP archive.
+
+    Temporary extraction is automatically removed
+    after processing.
     """
 
-    extract_dir = file_path.parent / file_path.stem
+    try:
+        with TemporaryDirectory(
+            prefix="geospatial_extract_"
+        ) as temp_dir:
 
-    extract_dir.mkdir(
-        parents=True,
-        exist_ok=True
-    )
+            extract_dir = Path(temp_dir)
 
-    with ZipFile(file_path, "r") as zip_file:
-        zip_file.extractall(extract_dir)
+            with ZipFile(file_path, "r") as zip_file:
 
-    shapefiles = list(extract_dir.rglob("*.shp"))
+                # Validate every ZIP member before extraction
+                for member in zip_file.infolist():
 
-    if not shapefiles:
+                    member_path = (
+                        extract_dir / member.filename
+                    )
+
+                    if not member_path.resolve().is_relative_to(
+                        extract_dir.resolve()
+                    ):
+                        raise ValueError(
+                            "ZIP file contains an unsafe file path."
+                        )
+
+                zip_file.extractall(extract_dir)
+
+            shapefiles = list(
+                extract_dir.rglob("*.shp")
+            )
+
+            if not shapefiles:
+                raise ValueError(
+                    "ZIP file does not contain a Shapefile."
+                )
+
+            if len(shapefiles) > 1:
+                raise ValueError(
+                    "ZIP file contains multiple Shapefiles. "
+                    "Please provide one Shapefile per ZIP."
+                )
+
+            try:
+                return gpd.read_file(shapefiles[0])
+            except Exception as error:
+                raise ValueError(
+                    "Invalid or corrupted Shapefile."
+                ) from error
+
+    except BadZipFile as error:
         raise ValueError(
-            "ZIP file does not contain a Shapefile (.shp)."
-        )
+            "Invalid or corrupted ZIP file."
+        ) from error
 
-    if len(shapefiles) > 1:
-        raise ValueError(
-            "ZIP file contains multiple Shapefiles. "
-            "Please provide one Shapefile per ZIP."
-        )
 
-    return gpd.read_file(shapefiles[0])
-
-def extract_features(gdf: gpd.GeoDataFrame) -> list[dict]:
+def extract_features(
+    gdf: gpd.GeoDataFrame
+) -> list[dict]:
     """
     Extract feature information from a GeoDataFrame.
     """
@@ -72,6 +115,7 @@ def extract_features(gdf: gpd.GeoDataFrame) -> list[dict]:
     features = []
 
     for index, row in gdf.iterrows():
+
         geometry = row.geometry
 
         properties = row.drop(
@@ -83,16 +127,24 @@ def extract_features(gdf: gpd.GeoDataFrame) -> list[dict]:
                 "feature_id": index,
                 "geometry_type": geometry.geom_type,
                 "geometry": geometry.__geo_interface__,
-                "crs": gdf.crs.to_string() if gdf.crs else None,
+                "crs": (
+                    gdf.crs.to_string()
+                    if gdf.crs
+                    else None
+                ),
                 "properties": properties,
             }
         )
 
     return features
 
-def get_projected_crs(gdf: gpd.GeoDataFrame) -> CRS:
+
+def get_projected_crs(
+    gdf: gpd.GeoDataFrame
+) -> CRS:
     """
-    Determine a suitable projected CRS for measurement.
+    Determine a suitable projected CRS for
+    accurate distance and area measurements.
     """
 
     if gdf.crs is None:
@@ -117,19 +169,24 @@ def get_projected_crs(gdf: gpd.GeoDataFrame) -> CRS:
             "Could not determine a suitable projected CRS."
         )
 
-    return CRS.from_user_input(projected_crs)
+    return CRS.from_user_input(
+        projected_crs
+    )
+
 
 def calculate_measurements(
     gdf: gpd.GeoDataFrame
 ) -> list[dict]:
     """
-    Calculate area and length for geospatial features
-    using a projected CRS.
+    Calculate area and length for geospatial
+    features using a projected CRS.
     """
 
     projected_crs = get_projected_crs(gdf)
 
-    projected_gdf = gdf.to_crs(projected_crs)
+    projected_gdf = gdf.to_crs(
+        projected_crs
+    )
 
     measurements = []
 
@@ -146,19 +203,19 @@ def calculate_measurements(
             "status": "success",
         }
 
-        if geometry_type == "Polygon":
+        if geometry_type in {
+            "Polygon",
+            "MultiPolygon"
+        }:
             result["area"] = geometry.area
-            result["measurement_unit"] = "square_meters"
+            result["measurement_unit"] = (
+                "square_meters"
+            )
 
-        elif geometry_type == "MultiPolygon":
-            result["area"] = geometry.area
-            result["measurement_unit"] = "square_meters"
-
-        elif geometry_type == "LineString":
-            result["length"] = geometry.length
-            result["measurement_unit"] = "meters"
-
-        elif geometry_type == "MultiLineString":
+        elif geometry_type in {
+            "LineString",
+            "MultiLineString"
+        }:
             result["length"] = geometry.length
             result["measurement_unit"] = "meters"
 
