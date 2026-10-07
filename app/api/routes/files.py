@@ -1,6 +1,7 @@
 import os
 import shutil
 from pathlib import Path
+from app.services.geospatial_service import read_geospatial_file
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
@@ -60,10 +61,36 @@ def upload_file(
     db.commit()
     db.refresh(db_file)
 
+    try:
+        gdf = read_geospatial_file(file_path)
+
+        db_file.crs = (
+            gdf.crs.to_string()
+            if gdf.crs
+            else None
+        )
+
+        db_file.feature_count = len(gdf)
+        db_file.status = "processed"
+
+        db.commit()
+        db.refresh(db_file)
+
+    except Exception as error:
+        db_file.status = "failed"
+        db.commit()
+
+        raise HTTPException(
+            status_code=400,
+            detail=f"Geospatial file processing failed: {error}"
+        )
+
     return {
         "id": db_file.id,
         "filename": db_file.filename,
         "file_type": db_file.file_type,
+        "crs": db_file.crs,
+        "feature_count": db_file.feature_count,
         "status": db_file.status
     }
     
