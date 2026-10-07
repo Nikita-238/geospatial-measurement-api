@@ -1,5 +1,6 @@
 from pathlib import Path
 from zipfile import ZipFile
+from pyproj import CRS
 
 import geopandas as gpd
 
@@ -88,3 +89,85 @@ def extract_features(gdf: gpd.GeoDataFrame) -> list[dict]:
         )
 
     return features
+
+def get_projected_crs(gdf: gpd.GeoDataFrame) -> CRS:
+    """
+    Determine a suitable projected CRS for measurement.
+    """
+
+    if gdf.crs is None:
+        raise ValueError(
+            "CRS is missing. Cannot calculate accurate measurements."
+        )
+
+    crs = CRS.from_user_input(gdf.crs)
+
+    if crs.is_projected:
+        return crs
+
+    if not crs.is_geographic:
+        raise ValueError(
+            "Unsupported CRS type for measurement."
+        )
+
+    projected_crs = gdf.estimate_utm_crs()
+
+    if projected_crs is None:
+        raise ValueError(
+            "Could not determine a suitable projected CRS."
+        )
+
+    return CRS.from_user_input(projected_crs)
+
+def calculate_measurements(
+    gdf: gpd.GeoDataFrame
+) -> list[dict]:
+    """
+    Calculate area and length for geospatial features
+    using a projected CRS.
+    """
+
+    projected_crs = get_projected_crs(gdf)
+
+    projected_gdf = gdf.to_crs(projected_crs)
+
+    measurements = []
+
+    for index, geometry in projected_gdf.geometry.items():
+
+        geometry_type = geometry.geom_type
+
+        result = {
+            "feature_id": index,
+            "geometry_type": geometry_type,
+            "area": None,
+            "length": None,
+            "measurement_unit": None,
+            "status": "success",
+        }
+
+        if geometry_type == "Polygon":
+            result["area"] = geometry.area
+            result["measurement_unit"] = "square_meters"
+
+        elif geometry_type == "MultiPolygon":
+            result["area"] = geometry.area
+            result["measurement_unit"] = "square_meters"
+
+        elif geometry_type == "LineString":
+            result["length"] = geometry.length
+            result["measurement_unit"] = "meters"
+
+        elif geometry_type == "MultiLineString":
+            result["length"] = geometry.length
+            result["measurement_unit"] = "meters"
+
+        elif geometry_type == "Point":
+            result["measurement_unit"] = None
+
+        else:
+            result["status"] = "unsupported"
+
+        measurements.append(result)
+
+    return measurements
