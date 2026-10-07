@@ -1,4 +1,5 @@
 from pathlib import Path
+from zipfile import ZipFile
 
 import geopandas as gpd
 
@@ -19,14 +20,45 @@ def read_geospatial_file(file_path: str | Path) -> gpd.GeoDataFrame:
     extension = file_path.suffix.lower()
 
     if extension == ".kml":
-        gdf = gpd.read_file(
+        return gpd.read_file(
             file_path,
             driver="KML"
         )
 
-    else:
+    if extension == ".zip":
+        return read_shapefile_zip(file_path)
+
+    raise ValueError(
+        f"Unsupported geospatial file format: {extension}"
+    )
+
+
+def read_shapefile_zip(file_path: Path) -> gpd.GeoDataFrame:
+    """
+    Extract a Shapefile ZIP archive and read the contained .shp file.
+    """
+
+    extract_dir = file_path.parent / file_path.stem
+
+    extract_dir.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    with ZipFile(file_path, "r") as zip_file:
+        zip_file.extractall(extract_dir)
+
+    shapefiles = list(extract_dir.rglob("*.shp"))
+
+    if not shapefiles:
         raise ValueError(
-            f"Unsupported geospatial file format: {extension}"
+            "ZIP file does not contain a Shapefile (.shp)."
         )
 
-    return gdf
+    if len(shapefiles) > 1:
+        raise ValueError(
+            "ZIP file contains multiple Shapefiles. "
+            "Please provide one Shapefile per ZIP."
+        )
+
+    return gpd.read_file(shapefiles[0])
