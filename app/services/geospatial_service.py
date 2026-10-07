@@ -62,3 +62,29 @@ def read_shapefile_zip(file_path: Path) -> gpd.GeoDataFrame:
         )
 
     return gpd.read_file(shapefiles[0])
+
+def extract_features(gdf: gpd.GeoDataFrame) -> list[dict]:
+    """
+    Extract feature information from a GeoDataFrame.
+    """
+
+    features = []
+
+    for index, row in gdf.iterrows():
+        geometry = row.geometry
+
+        properties = row.drop(
+            labels=["geometry"]
+        ).to_dict()
+
+        features.append(
+            {
+                "feature_id": index,
+                "geometry_type": geometry.geom_type,
+                "geometry": geometry.__geo_interface__,
+                "crs": gdf.crs.to_string() if gdf.crs else None,
+                "properties": properties,
+            }
+        )
+
+    return features
