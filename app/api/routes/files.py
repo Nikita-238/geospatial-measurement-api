@@ -66,3 +66,27 @@ def upload_file(
         "file_type": db_file.file_type,
         "status": db_file.status
     }
+    
+@router.get("/{file_id}/")
+
+def get_file(
+    file_id: int,
+    db: Session = Depends(get_db)
+):
+    db_file = db.get(FileModel, file_id)
+
+    if db_file is None:
+        raise HTTPException(
+            status_code=404,
+            detail="File not found."
+        )
+
+    return {
+        "id": db_file.id,
+        "filename": db_file.filename,
+        "file_type": db_file.file_type,
+        "crs": db_file.crs,
+        "feature_count": db_file.feature_count,
+        "status": db_file.status,
+        "created_at": db_file.created_at,
+    }
