@@ -7,6 +7,7 @@ def test_polygon_measurement_api(client):
     )
 
     with file_path.open("rb") as file:
+
         response = client.post(
             "/api/files/",
             files={
@@ -46,5 +47,106 @@ def test_polygon_measurement_api(client):
     assert measurement["area"] is not None
     assert measurement["area"] > 0
     assert measurement["length"] is None
-    assert measurement["measurement_unit"] == "square_meters"
+    assert measurement["measurement_unit"] == (
+        "square_meters"
+    )
+    assert measurement["status"] == "success"
+
+
+def test_line_measurement_api(client):
+    file_path = Path(
+        "sample_data/measurement_fixtures/line.zip"
+    )
+
+    with file_path.open("rb") as file:
+
+        response = client.post(
+            "/api/files/",
+            files={
+                "file": (
+                    "line.zip",
+                    file,
+                    "application/zip"
+                )
+            }
+        )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["file_type"] == "zip"
+    assert data["crs"] == "EPSG:4326"
+    assert data["feature_count"] == 1
+    assert data["status"] == "processed"
+
+    file_id = data["id"]
+
+    measurement_response = client.get(
+        f"/api/files/{file_id}/measurements/"
+    )
+
+    assert measurement_response.status_code == 200
+
+    measurements = measurement_response.json()
+
+    assert len(measurements) == 1
+
+    measurement = measurements[0]
+
+    assert measurement["feature_id"] == 0
+    assert measurement["geometry_type"] == "LineString"
+    assert measurement["area"] is None
+    assert measurement["length"] is not None
+    assert measurement["length"] > 0
+    assert measurement["measurement_unit"] == "meters"
+    assert measurement["status"] == "success"
+
+
+def test_point_measurement_api(client):
+    file_path = Path(
+        "sample_data/measurement_fixtures/point.zip"
+    )
+
+    with file_path.open("rb") as file:
+
+        response = client.post(
+            "/api/files/",
+            files={
+                "file": (
+                    "point.zip",
+                    file,
+                    "application/zip"
+                )
+            }
+        )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["file_type"] == "zip"
+    assert data["crs"] == "EPSG:4326"
+    assert data["feature_count"] == 1
+    assert data["status"] == "processed"
+
+    file_id = data["id"]
+
+    measurement_response = client.get(
+        f"/api/files/{file_id}/measurements/"
+    )
+
+    assert measurement_response.status_code == 200
+
+    measurements = measurement_response.json()
+
+    assert len(measurements) == 1
+
+    measurement = measurements[0]
+
+    assert measurement["feature_id"] == 0
+    assert measurement["geometry_type"] == "Point"
+    assert measurement["area"] is None
+    assert measurement["length"] is None
+    assert measurement["measurement_unit"] is None
     assert measurement["status"] == "success"
